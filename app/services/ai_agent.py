@@ -158,7 +158,7 @@ def parse_patch(patch: str) -> List[Dict]:
         return []
 
 
-async def analyze_code(repo_url: str, pr_number: int, github_token: str, task_id:str) -> PRAnalysisResult:
+async def analyze_code(repo_url: str, pr_number: int, github_token: str, task_id:str) -> Dict:
     """
     Analyze the code changes in a pull request.
     Args:
@@ -243,11 +243,11 @@ async def analyze_code(repo_url: str, pr_number: int, github_token: str, task_id
             "critical_issues": critical_issues,
         }
 
-        return PRAnalysisResult(
-            task_id=task_id,
-            status="completed",
-            results={"files": results, "summary": summary}
-        )
+        return {
+            "task_id":task_id,
+            "status":"completed",
+            "results":{"files": results, "summary": summary}
+        }
 
     except APIError as api_err:
         logger.error(f"API Error during code analysis: {api_err}")
