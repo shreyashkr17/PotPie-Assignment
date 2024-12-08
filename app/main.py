@@ -7,4 +7,4 @@ app.include_router(router)
 
 @app.get("/")
 async def root():
-    return {"message": "Backend is running on port 8080"}
+    return "Hello, World!"

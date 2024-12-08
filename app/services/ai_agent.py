@@ -1,10 +1,38 @@
 import httpx
 import os
 import json 
+import logging
 from dotenv import load_dotenv
-from typing import List, Dict
+from typing import List, Dict, Optional, Union
+from pydantic import BaseModel, ValidationError
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
+
+class APIError(Exception):
+    """Custom exception for API-related errors."""
+    def __init__(self, message: str, status_code: Optional[int] = None):
+        self.message = message
+        self.status_code = status_code
+        super().__init__(self.message)
+
+class CodeAnalysisResult(BaseModel):
+    """Structured result for code analysis."""
+    type: str
+    line: int
+    description: str
+
+class PRAnalysisResult(BaseModel):
+    """Structured result for PR analysis."""
+    task_id: str
+    status: str
+    results: Dict[str, Union[List[Dict], Dict]]
+
 
 OLLAMA_API_URL = os.getenv("LLAMA_API_URL", "http://localhost:11434/api/generate")
 
@@ -25,21 +53,28 @@ async def call_llama_api(prompt: str) -> str:
             )
             response.raise_for_status()
             response_data = response.json()
-            if "response" in response_data:
-                raw_response = response_data["response"]
-                # Split the response into category and description
+            
+            if "response" not in response_data:
+                logger.warning(f"Unexpected response format: {response_data}")
+                return {"category": "Unknown", "description": "Failed to parse response."}
+            
+            raw_response = response_data["response"]
+            try:
                 category, description = map(str.strip, raw_response.split(",", 1))
                 return {"category": category, "description": description}
-            else:
-                print(f"Unexpected response format: {response_data}")
-                return {"category": "Unknown", "description": "Failed to parse response."}
+            except ValueError:
+                logger.error(f"Could not split response: {raw_response}")
+                return {"category": "Error", "description": "Invalid response format"}
     except httpx.HTTPStatusError as e:
-        print(f"HTTP Status Error: {e.response.status_code}")
-        print(f"Response Content: {e.response.text}") 
+        logger.error(f"HTTP Status Error: {e.response.status_code}")
+        logger.error(f"Response Content: {e.response.text}")
+        raise APIError(f"API call failed: {e}", e.response.status_code)
+    except httpx.RequestError as e:
+        logger.error(f"Network error occurred: {e}")
+        raise APIError(f"Network error: {e}")
     except Exception as e:
-        print(f"An error occurred: {e}")
-        
-    return {"category": "Error", "description": "An error occurred during API call."}
+        logger.error(f"An error occurred: {e}")
+        raise APIError(f"An error occurred: {e}")
 
 
 
@@ -65,10 +100,17 @@ async def get_changed_files(repo_url: str, pr_number: int, github_token: str) ->
             return response.json()
 
     except httpx.HTTPStatusError as e:
-        print(f"HTTP error occurred: {e}")
+        logger.error(f"GitHub API error: {e.response.status_code}")
+        raise APIError(f"GitHub API error: {e}", e.response.status_code)
+    
+    except ValueError as e:
+        logger.error(f"Invalid input: {e}")
+        raise APIError(str(e))
+    
     except Exception as e:
-        print(f"An error occurred: {e}")
-
+        logger.error(f"Unexpected error fetching changed files: {e}")
+        raise APIError(f"Unexpected error: {e}")
+    
     return []
 
 
@@ -91,26 +133,32 @@ def parse_patch(patch: str) -> List[Dict]:
     """
     Parse the patch to extract line changes.
     """
-    lines = patch.split("\n")
-    changes = []
-    current_line = 0
+    try:
+        lines = patch.split("\n")
+        changes = []
+        current_line = 0
 
-    for line in lines:
-        if line.startswith("@@"):
-            parts = line.split(" ")
-            _, old_range, new_range = parts[:3]
-            _, start_line = new_range.split("+")
-            current_line = int(start_line.split(",")[0])
-        elif line.startswith("+") and not line.startswith("+++"):
-            changes.append({"line": current_line, "code": line[1:].strip()})
-            current_line += 1
-        elif not line.startswith("-") and not line.startswith(" "):
-            current_line += 1
+        for line in lines:
+            if line.startswith("@@"):
+                parts = line.split(" ")
+                if len(parts) < 3:
+                    continue
+                _, old_range, new_range = parts[:3]
+                _, start_line = new_range.split("+")
+                current_line = int(start_line.split(",")[0])
+            elif line.startswith("+") and not line.startswith("+++"):
+                changes.append({"line": current_line, "code": line[1:].strip()})
+                current_line += 1
+            elif not line.startswith("-") and not line.startswith(" "):
+                current_line += 1
 
-    return changes
+        return changes
+    except Exception as e:
+        logger.error(f"Error parsing patch: {e}")
+        return []
 
 
-async def analyze_code(repo_url: str, pr_number: int, github_token: str, task_id:str) -> Dict:
+async def analyze_code(repo_url: str, pr_number: int, github_token: str, task_id:str) -> PRAnalysisResult:
     """
     Analyze the code changes in a pull request.
     Args:
@@ -122,6 +170,9 @@ async def analyze_code(repo_url: str, pr_number: int, github_token: str, task_id
         Dict: Analysis results including issues and summary.
     """
     try:
+        if not all([repo_url, pr_number, github_token, task_id]):
+            raise ValueError("Missing required parameters")
+        
         changed_files = await get_changed_files(repo_url, pr_number, github_token)
 
         if not changed_files:
@@ -147,19 +198,12 @@ async def analyze_code(repo_url: str, pr_number: int, github_token: str, task_id
             patch = file.get("patch", "")
             contents_url = file.get("contents_url", "")
 
-            print("here is the patch")
-            # patch="@@ -0,0 +1,9 @@\n+def calculate_sum(numbers):\n+    total = 0\n+    for num in numbers:\n+        total+=num   # Style issue: missing spaces\n+    return total     # No type hints\n+\n+def process_data(data=None):   # Potential bug: mutable default\n+    if data:\n+        return data.process()   # No error handling\n\\ No newline at end of file"
-            print(patch)
-
             if not patch or not contents_url:
                 continue
 
             file_contents = await get_file_contents(contents_url, github_token)
 
             changes = parse_patch(patch)
-
-            print("here are the changes")
-            print(changes)
 
             issues = []
             for change in changes:
@@ -168,23 +212,28 @@ async def analyze_code(repo_url: str, pr_number: int, github_token: str, task_id
 
                 print(line_number, code_snippet)
 
-                prompt = (
-                    f"Analyse this line of code for issues: line no: {line_number} - {code_snippet}\n"
-                    f"Categorize as one of the category in one word: Improvement, Style, Bug, Best Practice."
-                    f"Response should be in one word. And then write a description for this line in 7-10 words at most."
-                    f"Return response like this category, description"
-                )
+                try:
+                    prompt = (
+                        f"Analyse this line of code for issues: line no: {line_number} - {code_snippet}\n"
+                        f"Categorize as one of the category in one word: Improvement, Style, Bug, Best Practice."
+                        f"Response should be in one word. And then write a description for this line in 7-10 words at most."
+                        f"Return response like this category, description"
+                    )
 
-                analysis = await call_llama_api(prompt)
-                print(analysis)
+                    analysis = await call_llama_api(prompt)
+                    print(analysis)
 
-                if analysis:
-                    issues.append({
-                        "type": analysis["category"],
-                        "line": line_number,
-                        "description": analysis["description"],
-                    })
-                    total_issues+=1
+                    code_issue = CodeAnalysisResult(
+                            type=analysis.get("category", "Unknown"),
+                            line=line_number,
+                            description=analysis.get("description", "No description")
+                        )
+                        
+                    issues.append(code_issue.dict())
+                    total_issues += 1
+                except Exception as analysis_error:
+                    logger.error(f"Error analyzing code snippet: {analysis_error}")
+                    continue
 
             results.append({"name": file_name, "issues": issues})
 
@@ -194,19 +243,32 @@ async def analyze_code(repo_url: str, pr_number: int, github_token: str, task_id
             "critical_issues": critical_issues,
         }
 
-        return {
-            "task_id": task_id,
-            "status": "completed",
-            "results": {"files": results, "summary": summary},
-        }
+        return PRAnalysisResult(
+            task_id=task_id,
+            status="completed",
+            results={"files": results, "summary": summary}
+        )
 
-    except Exception as e:
-        print(f"Error in analyzing code: {e}")
-        return {
-            "task_id": "N/A",
-            "status": "failed",
-            "results": {
+    except APIError as api_err:
+        logger.error(f"API Error during code analysis: {api_err}")
+        return PRAnalysisResult(
+            task_id=task_id,
+            status="failed",
+            results={
                 "files": [],
                 "summary": {"total_files": 0, "total_issues": 0, "critical_issues": 0},
-            },
-        }
+                "error": str(api_err)
+            }
+        )
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in code analysis: {e}")
+        return PRAnalysisResult(
+            task_id=task_id,
+            status="failed",
+            results={
+                "files": [],
+                "summary": {"total_files": 0, "total_issues": 0, "critical_issues": 0},
+                "error": "Unexpected system error"
+            }
+        )
