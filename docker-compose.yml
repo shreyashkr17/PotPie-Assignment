@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:6.2-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass root
+    volumes:
+      - redis_data:/data
+
+  backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=root
+      - REDIS_DB=0
+      - REDIS_DB_BROKER=0
+      - REDIS_DB_BACKEND=1
+      - LLAMA_API_URL=http://host.docker.internal:11434/api/generate
+    volumes:
+      - .:/app
+
+  celery_worker:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A app.services.celery_tasks worker --loglevel=info
+    depends_on:
+      - redis
+      - backend
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=root
+      - REDIS_DB=0
+      - REDIS_DB_BROKER=0
+      - REDIS_DB_BACKEND=1
+      - LLAMA_API_URL=http://host.docker.internal:11434/api/generate
+
+volumes:
+  redis_data:
