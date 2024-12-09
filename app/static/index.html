@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Project Documentation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family: "Montserrat", sans-serif;
+        margin: 0;
+        padding: 0;
+        line-height: 1.6;
+        background-color: #f9f9f9;
+        color: #333;
+      }
+      header {
+        background-color: #4caf50;
+        color: white;
+        padding: 10px 20px;
+        text-align: center;
+      }
+      section {
+        padding: 20px;
+        max-width: 1200px;
+        margin: auto;
+      }
+      h1,
+      h2,
+      h3 {
+        font-weight: 700;
+        margin-top: 20px;
+      }
+      p {
+        margin: 10px 0;
+      }
+      code {
+        background-color: #eaeaea;
+        padding: 2px 5px;
+        border-radius: 3px;
+      }
+      ul {
+        margin-left: 20px;
+      }
+      li {
+        margin-bottom: 10px;
+      }
+      footer {
+        background-color: #4caf50;
+        color: white;
+        text-align: center;
+        padding: 10px 0;
+        margin-top: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>PotpieAI Assignment: FastAPI Backend Documentation</h1>
+    </header>
+    <section>
+      <h2>Project Setup Instructions</h2>
+      <p>Follow the steps below to set up and run the project manually:</p>
+      <ul>
+        <li>
+          <strong>Clone the repository:</strong>
+          <code
+            >git clone
+            https://github.com/shreyashkr17/PotPie-Assignment.git</code
+          >
+        </li>
+        <li>
+          <strong>Navigate to the project directory:</strong>
+          <code>cd potpie-assignment</code>
+        </li>
+        <li>
+          <strong>Create a Python virtual environment:</strong>
+          <code>python3.8 -m venv env</code>
+        </li>
+        <li><strong>Activate the virtual environment:</strong></li>
+        <ul>
+          <li>Linux/Mac: <code>source env/bin/activate</code></li>
+          <li>Windows: <code>env\Scripts\activate</code></li>
+        </ul>
+        <li>
+          <strong>Install the dependencies:</strong>
+          <code>pip install -r requirements.txt</code>
+        </li>
+        <li>
+          <strong>Set up Redis:</strong> Install and start Redis on your local
+          machine or use a cloud-hosted Redis instance.
+        </li>
+        <li>
+          <strong>Run the FastAPI application:</strong>
+          <code>uvicorn app.main:app --reload --host 0.0.0.0 --port 4040</code>
+        </li>
+        <li>
+          <strong>Start the Celery worker:</strong>
+          <code>python celery_worker.py</code>
+        </li>
+      </ul>
+      <p>
+        The backend will now be available at
+        <a href="http://127.0.0.1:4040" target="_blank">http://127.0.0.1:4040</a
+        >.
+      </p>
+    </section>
+    <section>
+      <h2>API Documentation</h2>
+      <h3>1. <code>POST /analyze-pr</code></h3>
+      <p>Analyze a pull request for issues in the changed code.</p>
+      <ul>
+        <li><strong>cURL Command:</strong></li>
+        <p>
+          <code>
+            curl --location 'https://api.shortlycut.xyz/analyze-pr' \ --header
+            'Content-Type: application/json' \ --data '{ "repo_url":
+            "https://github.com/shreyashkr17/sample-test", "pr_number": 1,
+            "github_token": "token" }'
+          </code>
+        </p>
+        <li><strong>Request Body:</strong></li>
+        <code>
+          <pre>
+                    {
+                        "repo_url": "https://github.com/shreyashkr17/sample-test",
+                        "pr_number": 1,
+                        "github_token": "token_id"
+                    }
+                </pre
+          >
+        </code>
+        <li>
+          <strong>Response:</strong> Returns a <code>task_id</code> to track the
+          analysis progress.
+        </li>
+      </ul>
+      <h3>2. <code>GET /status/{task_id}</code></h3>
+      <p>Check the status of a task.</p>
+      <ul>
+        <li><strong>cURL Command:</strong></li>
+        <p>
+            <code>
+                curl --location 'https://api.shortlycut.xyz/status/{task_id}>'
+            </code>
+          </p>
+        <li>
+          <strong>Response:</strong> Task status (e.g., "processing",
+          "completed", or "failed").
+        </li>
+      </ul>
+      <h3>3. <code>GET /results/{task_id}</code></h3>
+      <p>Retrieve the results of a completed task.</p>
+      <ul>
+        <li><strong>cURL Command:</strong></li>
+        <p>
+            <code>
+                curl --location 'https://api.shortlycut.xyz/results/{task_id}'
+            </code>
+        </p>
+        <li>
+          <strong>Response:</strong> Analysis results, including identified
+          issues and their details.
+        </li>
+      </ul>
+    </section>
+    <section>
+      <h2>Future Improvements</h2>
+      <h3>Rate Limiting with UUID-based Cookies</h3>
+      <p>
+        To handle scenarios where multiple users (e.g., 100 users) send requests
+        simultaneously:
+      </p>
+      <ul>
+        <li>
+          Generate a unique <code>UUID</code> for each user during their first
+          interaction and set it as a browser cookie.
+        </li>
+        <li>
+          Use this UUID to track and limit requests instead of relying on IP
+          addresses (to handle users behind shared IPs).
+        </li>
+        <li>
+          Store the request counts for each UUID in Redis, with an expiration
+          time (e.g., reset every minute).
+        </li>
+        <li>
+          Reject requests exceeding the allowed limit with a 429 Too Many
+          Requests response.
+        </li>
+      </ul>
+      <p><strong>Steps:</strong></p>
+      <ol>
+        <li>
+          During the first request, generate a UUID and send it in the response
+          as a cookie.
+        </li>
+        <li>
+          Subsequent requests should include the UUID cookie. Check the request
+          count for that UUID in Redis.
+        </li>
+        <li>
+          If the count exceeds the limit (e.g., 10 requests per minute), reject
+          the request with an appropriate error message.
+        </li>
+      </ol>
+      <p>
+        This approach ensures fair usage and avoids caching users based on
+        shared IPs, enhancing user experience and system reliability.
+      </p>
+    </section>
+    <footer>
+      <p>FastAPI Backend Project - 2024</p>
+    </footer>
+  </body>
+</html>
